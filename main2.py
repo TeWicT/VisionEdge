@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any, List
 class YOLOModel:
     """Класс для работы с моделью YOLO"""
 
-    def __init__(self, model_path: str = 'yolov5s.pt'):
+    def __init__(self, model_path: str = 'best.pt'):
         self.model = self.load_model(model_path)
         self.classes = self.model.names if hasattr(self.model, 'names') else []
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
