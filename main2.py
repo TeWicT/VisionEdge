@@ -6,30 +6,32 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import torch
 from typing import Optional, Dict, Any, List
-
-
+from ultralytics import YOLO
+from tkinter import filedialog
+print(torch.version.cuda)
 class YOLOModel:
-    """Класс для работы с моделью YOLO"""
+    """Класс для работы с моделью YOLOv8"""
 
     def __init__(self, model_path: str = 'best.pt'):
         self.model = self.load_model(model_path)
-        self.classes = self.model.names if hasattr(self.model, 'names') else []
+        self.classes = self.model.names
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(torch.cuda.is_available())
 
     def load_model(self, model_path: str):
-        """Загружает модель YOLO"""
+        """Загружает модель YOLOv8"""
         try:
-            model = torch.hub.load('ultralytics/yolov5', 'custom', path=model_path)
-            return model
+            return YOLO(model_path)  # <-- используем Ultralytics API напрямую
         except Exception as e:
-            raise RuntimeError(f"Ошибка загрузки модели YOLO: {e}")
+            raise RuntimeError(f"Ошибка загрузки модели YOLOv8: {e}")
 
     def detect(self, frame: np.ndarray) -> Dict[str, Any]:
         """Выполняет детекцию объектов на кадре"""
-        results = self.model(frame)
+        results = self.model(frame, verbose=False)[0]  # получаем первый результат
+        rendered_frame = results.plot()
         return {
-            'detections': results.xyxy[0].cpu().numpy(),
-            'frame': np.squeeze(results.render())
+            'detections': results.boxes.data.cpu().numpy(),  # numpy-массив с box, conf, cls
+            'frame': rendered_frame
         }
 
 
@@ -70,6 +72,8 @@ class VideoProcessor:
         if not ret:
             return None
 
+        frame = cv2.resize(frame, (640, 480))  # или (416, 416)
+
         # Детекция объектов с помощью YOLO
         results = self.yolo.detect(frame)
         self.current_frame = results['frame']
@@ -109,7 +113,7 @@ class VisionEdgeUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("VisionEdge - Интерфейс управления")
-        self.geometry("1000x700")
+        self.geometry("1920x1080")
 
         self.video_processor = VideoProcessor()
         self.setup_ui()
@@ -118,7 +122,39 @@ class VisionEdgeUI(tk.Tk):
         self.video_label = tk.Label(self)
         self.video_label.pack(side=tk.RIGHT, padx=10, pady=10)
 
+        # Ползунок перемотки
+        self.seek_var = tk.DoubleVar()
+        self.seek_slider = ttk.Scale(self, from_=0, to=100, orient="horizontal",
+                                    variable=self.seek_var, command=self.on_seek)
+        self.seek_slider.pack(side=tk.RIGHT, fill=tk.X, padx=10, pady=5)
+        self.time_label = ttk.Label(self, text="00:00 / 00:00")
+        self.time_label.pack(side=tk.RIGHT, padx=10)
+
+        self.seek_slider.config(state="disabled")
+
+
         self.update_video()
+
+    def format_time(self, seconds: float) -> str:
+        minutes = int(seconds) // 60
+        sec = int(seconds) % 60
+        return f"{minutes:02}:{sec:02}"
+
+
+    def on_seek(self, value):
+        if self.video_processor.capture is not None and not self.video_processor.capture.get(cv2.CAP_PROP_FPS) == 0:
+            frame_count = int(self.video_processor.capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            seek_frame = int(float(value) / 100 * frame_count)
+            self.video_processor.capture.set(cv2.CAP_PROP_POS_FRAMES, seek_frame)
+
+
+    def select_video_file(self):
+        """Открывает диалог выбора видеофайла и подставляет путь в поле"""
+        filetypes = [("Video files", "*.mp4 *.avi *.mov *.mkv"), ("All files", "*.*")]
+        filename = filedialog.askopenfilename(title="Выберите видеофайл", filetypes=filetypes)
+        if filename:
+            self.source_var.set(filename)
+
 
     def setup_ui(self):
         """Настраивает элементы интерфейса"""
@@ -148,6 +184,7 @@ class VisionEdgeUI(tk.Tk):
         ttk.Label(settings_frame, text="Источник видео:").pack(anchor=tk.W)
         self.source_var = tk.StringVar(value="0")
         ttk.Entry(settings_frame, textvariable=self.source_var).pack(fill=tk.X)
+        ttk.Button(settings_frame, text="Выбрать файл", command=self.select_video_file).pack(fill=tk.X, pady=(5, 0))
 
         # Раздел "Дополнительно"
         advanced_frame = ttk.LabelFrame(control_frame, text="Дополнительно", padding=10)
@@ -165,6 +202,15 @@ class VisionEdgeUI(tk.Tk):
             source = int(source)
 
         if self.video_processor.start_stream(source):
+            # Проверим, является ли источник видеофайлом
+            if isinstance(source, str) and not source.startswith("rtsp") and not source.startswith("http"):
+                self.seek_slider.config(state="normal")
+                total_frames = int(self.video_processor.capture.get(cv2.CAP_PROP_FRAME_COUNT))
+                if total_frames > 0:
+                    self.seek_slider.config(to=100)
+            else:
+                self.seek_slider.config(state="disabled")
+
             messagebox.showinfo("Информация", "Видеопоток успешно запущен")
         else:
             messagebox.showerror("Ошибка", "Не удалось запустить видеопоток")
@@ -197,6 +243,27 @@ class VisionEdgeUI(tk.Tk):
 
             # Обновляем информацию
             self.update_info()
+
+        # Обновим ползунок, если это видеофайл
+        cap = self.video_processor.capture
+        if cap is not None and self.seek_slider["state"] == "normal":
+            pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+            total = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            if total > 0:
+                self.seek_var.set(pos / total * 100)
+
+        # Обновим текст времени
+        # Обновим текст времени
+        capture = self.video_processor.capture
+        if capture is not None:
+            fps = capture.get(cv2.CAP_PROP_FPS)
+            if fps > 0:
+                current_sec = capture.get(cv2.CAP_PROP_POS_FRAMES) / fps
+                total_sec = capture.get(cv2.CAP_PROP_FRAME_COUNT) / fps
+                self.time_label.config(
+                    text=f"{self.format_time(current_sec)} / {self.format_time(total_sec)}"
+                )
+
 
         self.after(10, self.update_video)
 
