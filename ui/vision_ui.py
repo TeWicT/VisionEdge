@@ -4,11 +4,13 @@ from PIL import Image, ImageTk
 import cv2
 import time
 from core.video_processor import VideoProcessor
+from ui.admin_ui import AdminUI
 
 class VisionEdgeUI(tk.Tk):
-    def __init__(self):
+    def __init__(self,user=None):
         super().__init__()
-        self.title("VisionEdge - Интерфейс управления")
+        self.user = user
+        self.title(f"VisionEdge — {self.user['username']}")
         self.geometry("1920x1080")
 
         self.video_processor = VideoProcessor()
@@ -77,7 +79,12 @@ class VisionEdgeUI(tk.Tk):
         self.source_var = tk.StringVar(value="0")
         ttk.Entry(settings_frame, textvariable=self.source_var).pack(fill=tk.X)
         ttk.Button(settings_frame, text="Выбрать файл", command=self.select_video_file).pack(fill=tk.X, pady=(5, 0))
-
+        if self.user.get('is_admin'):
+            admin_frame = ttk.LabelFrame(control_frame, text="Админ", padding=10)
+            admin_frame.pack(fill=tk.X, pady=5)
+            ttk.Button(admin_frame, text="Админ‑панель", command=self.open_admin).pack(fill=tk.X)
+    def open_admin(self):
+        AdminUI(self)
     def start_stream(self):
         # Запуск видеопотока
         source = self.source_var.get()
@@ -100,7 +107,6 @@ class VisionEdgeUI(tk.Tk):
     def stop_stream(self):
         # Остановка видеопотока
         self.video_processor.stop_stream()
-        messagebox.showinfo("Информация", "Видеопоток остановлен")
 
     def take_snapshot(self):
         # Сохранение текущего кадра
