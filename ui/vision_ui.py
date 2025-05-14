@@ -5,13 +5,14 @@ import cv2
 import time
 from core.video_processor import VideoProcessor
 from ui.admin_ui import AdminUI
-
+from utils.report import generate_report
 class VisionEdgeUI(tk.Tk):
     def __init__(self,user=None):
         super().__init__()
         self.user = user
         self.title(f"VisionEdge — {self.user['username']}")
         self.geometry("1920x1080")
+        self.detection_log = []
 
         self.video_processor = VideoProcessor()
         self.setup_ui()  # Инициализация интерфейса
@@ -65,6 +66,7 @@ class VisionEdgeUI(tk.Tk):
         ttk.Button(operations_frame, text="Старт", command=self.start_stream).pack(fill=tk.X)
         ttk.Button(operations_frame, text="Стоп", command=self.stop_stream).pack(fill=tk.X)
         ttk.Button(operations_frame, text="Снимок", command=self.take_snapshot).pack(fill=tk.X)
+        ttk.Button(operations_frame, text="Отчет", command=self.create_report).pack(fill=tk.X)
 
         # Информация о детекциях
         info_frame = ttk.LabelFrame(control_frame, text="Информация", padding=10)
@@ -85,6 +87,14 @@ class VisionEdgeUI(tk.Tk):
             ttk.Button(admin_frame, text="Админ‑панель", command=self.open_admin).pack(fill=tk.X)
     def open_admin(self):
         AdminUI(self)
+    def create_report(self):
+        filename = filedialog.asksaveasfilename(defaultextension=".pdf",
+                        filetypes=[("PDF files", "*.pdf")])
+        if not filename:
+            return
+        generate_report(self.detection_log, filename)
+        messagebox.showinfo("Успех", f"Отчет сохранен: {filename}")
+
     def start_stream(self):
         # Запуск видеопотока
         source = self.source_var.get()
@@ -151,6 +161,10 @@ class VisionEdgeUI(tk.Tk):
         info = f"FPS: {self.video_processor.fps:.1f}\n\nОбнаруженные объекты:\n"
         for obj in self.video_processor.get_detections_info():
             info += f"- {obj['class']} ({obj['confidence']:.2f})\n"
+        current_time = self.video_processor.capture.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+        classes = [obj['class'] for obj in self.video_processor.get_detections_info()]
+        self.detection_log.append((current_time, classes))
+
         self.info_text.delete(1.0, tk.END)
         self.info_text.insert(tk.END, info)
 
